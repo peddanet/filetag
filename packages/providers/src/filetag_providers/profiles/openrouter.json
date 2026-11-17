@@ -1,0 +1,5 @@
+{"id": "openrouter", "name": "OpenRouter", "kind": "cloud", "api": "openai",
+ "endpoint": "https://openrouter.ai/api/v1", "video_input": false, "adult_content": "risk",
+ "policy_url": "https://openrouter.ai/docs/features/privacy-and-logging",
+ "policy_checked": "2026-11-14",
+ "data_use": "Depends on the routed provider; exclude providers that train in the settings."}

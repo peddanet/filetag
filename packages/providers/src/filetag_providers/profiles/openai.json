@@ -1,0 +1,4 @@
+{"id": "openai", "name": "OpenAI API", "kind": "cloud", "api": "openai",
+ "endpoint": "https://api.openai.com/v1", "video_input": false, "adult_content": "risk",
+ "policy_url": "https://openai.com/policies/usage-policies/", "policy_checked": "2026-11-14",
+ "data_use": "Paid API. Policy does not address adult content explicitly; models may refuse."}

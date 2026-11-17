@@ -1,0 +1,5 @@
+{"id": "vllm", "name": "vLLM (own hardware)", "kind": "local", "api": "openai",
+ "endpoint": "http://127.0.0.1:8000/v1", "video_input": true, "adult_content": "permitted",
+ "policy_url": "https://docs.vllm.ai/en/v0.20.0/features/multimodal_inputs/",
+ "policy_checked": "2026-11-14",
+ "data_use": "Runs on own hardware; no data leaves the machine. Model licences apply."}

@@ -1,0 +1,5 @@
+{"id": "anthropic", "name": "Anthropic Claude API", "kind": "cloud", "api": "anthropic",
+ "endpoint": "https://api.anthropic.com", "video_input": false,
+ "adult_content": "not_permitted",
+ "policy_url": "https://www.anthropic.com/legal/aup", "policy_checked": "2026-11-14",
+ "data_use": "No training on commercial data; usage policy forbids explicit adult content."}

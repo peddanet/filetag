@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "filetag-worker"
+dynamic = ["version"]
+description = "filetag: worker - media analysis on the GPU host or locally, calls a model backend."
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Peter Wein" }]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: POSIX :: Linux",
+  "Environment :: Console",
+]
+dependencies = ["filetag-protocol", "filetag-providers"]
+
+[project.scripts]
+filetag-worker = "filetag_worker.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "filetag_worker.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+

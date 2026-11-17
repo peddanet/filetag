@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "filetag-providers"
+dynamic = ["version"]
+description = "filetag: model backends (local servers and cloud APIs), provider profiles and their policy facts."
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Peter Wein" }]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: POSIX :: Linux",
+  "Environment :: Console",
+]
+dependencies = []
+
+[tool.setuptools.dynamic]
+version = { attr = "filetag_providers.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"filetag_providers" = ["profiles/*.json"]

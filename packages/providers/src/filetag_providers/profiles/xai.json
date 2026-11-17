@@ -1,0 +1,4 @@
+{"id": "xai", "name": "xAI Grok API", "kind": "cloud", "api": "openai",
+ "endpoint": "https://api.x.ai/v1", "video_input": false, "adult_content": "risk",
+ "policy_url": "https://x.ai/legal/acceptable-use-policy", "policy_checked": "2026-11-14",
+ "data_use": "Policy forbids depicting likenesses of persons in a pornographic manner."}

@@ -1,0 +1,57 @@
+name: quality-gates
+
+# Branching model (see CONTRIBUTING.md):
+#   feature/*  -> rebased onto develop, pull request for the CI run,
+#                 then fast-forward of develop (no merge commits)
+#   develop    -> integration; fast-forward of main for a release
+#   main       -> releases only, every release is an annotated tag vX.Y.Z
+#
+#   pull_request into main/develop  gates on the merge result; required check
+#   push of a tag v*                 release-check only: the tagged commit is the
+#                                    head of a pull request that was tested
+# Python versions: the oldest supported (requires-python) and the newest.
+# Branch pushes start no run; a branch without a pull request:
+#   gh workflow run quality-gates --ref BRANCH
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  gates:
+    if: github.ref_type != 'tag'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: python tools and packages
+        run: pip install -r requirements-dev.txt
+      - name: quality gates (format, lint, types, security, tests)
+        run: tools/check.sh
+
+  release-check:
+    # A tag must point to a commit on main and match the version of every package.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: tag is on main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - name: tag matches the version of every package
+        run: |
+          for p in protocol core worker providers; do
+            v=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' packages/$p/src/filetag_$p/__init__.py)
+            test "v$v" = "$GITHUB_REF_NAME" || { echo "$p: tag $GITHUB_REF_NAME != v$v"; exit 1; }
+          done

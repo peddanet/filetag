@@ -1,0 +1,4 @@
+{"id": "mistral", "name": "Mistral API (EU)", "kind": "cloud", "api": "openai",
+ "endpoint": "https://api.mistral.ai/v1", "video_input": false, "adult_content": "permitted",
+ "policy_url": "https://legal.mistral.ai/terms/usage-policy", "policy_checked": "2026-11-14",
+ "data_use": "Free mode trains on inputs by default; opt out in the admin panel first."}

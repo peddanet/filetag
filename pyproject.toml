@@ -1,0 +1,84 @@
+# Root of the filetag monorepo. This file holds no package; it only
+# configures the quality gates for all packages in packages/*.
+# Install for development (normal user, inside a venv):
+#     pip install -r requirements-dev.txt
+
+# --- pytest -----------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [
+  "packages/protocol/src",
+  "packages/core/src",
+  "packages/worker/src",
+  "packages/providers/src",
+]
+# resource leaks (unclosed files, DB connections) fail the test run
+filterwarnings = [
+  "error::ResourceWarning",
+  "error::pytest.PytestUnraisableExceptionWarning",
+]
+
+# --- pylint -----------------------------------------------------------------
+# Docstrings follow the Google style (Args/Returns/Yields/Raises) and are
+# enforced by the docparams extension.
+[tool.pylint.main]
+load-plugins = ["pylint.extensions.docparams", "pylint.extensions.docstyle"]
+py-version = "3.12"
+init-hook = "import sys; sys.path[:0] = ['packages/protocol/src', 'packages/core/src', 'packages/worker/src', 'packages/providers/src']"
+
+[tool.pylint.format]
+max-line-length = 100
+
+[tool.pylint.parameter_documentation]
+default-docstring-type = "google"
+accept-no-param-doc = false
+accept-no-raise-doc = false
+accept-no-return-doc = false
+accept-no-yields-doc = false
+
+[tool.pylint.design]
+# collaborators are injected through the constructor (testability)
+max-args = 10
+max-positional-arguments = 10
+max-attributes = 12
+max-locals = 22
+min-public-methods = 1
+
+# --- mypy -------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+files = [
+  "packages/protocol/src",
+  "packages/core/src",
+  "packages/worker/src",
+  "packages/providers/src",
+]
+mypy_path = [
+  "packages/protocol/src",
+  "packages/core/src",
+  "packages/worker/src",
+  "packages/providers/src",
+]
+explicit_package_bases = true
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+
+# --- coverage ---------------------------------------------------------------
+[tool.coverage.run]
+source = ["filetag_protocol", "filetag_core", "filetag_worker", "filetag_providers"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 90
+precision = 2
+show_missing = true
+skip_covered = true
+
+# --- bandit -----------------------------------------------------------------
+[tool.bandit]
+# No skipped checks yet. When external programs (ffmpeg) are called, they are
+# called with argument lists via shutil.which, never with shell=True; the
+# skips B404/B603 are added then, with this justification.
+skips = []

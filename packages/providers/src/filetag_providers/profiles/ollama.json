@@ -1,0 +1,4 @@
+{"id": "ollama", "name": "Ollama (own hardware)", "kind": "local", "api": "ollama",
+ "endpoint": "http://127.0.0.1:11434", "video_input": false, "adult_content": "permitted",
+ "policy_url": "https://docs.ollama.com/gpu", "policy_checked": "2026-11-14",
+ "data_use": "Runs on own hardware; no data leaves the machine. Model licences apply."}

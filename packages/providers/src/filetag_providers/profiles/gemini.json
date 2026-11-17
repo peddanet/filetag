@@ -1,0 +1,6 @@
+{"id": "gemini", "name": "Google Gemini API", "kind": "cloud", "api": "gemini",
+ "endpoint": "https://generativelanguage.googleapis.com", "video_input": true,
+ "adult_content": "risk",
+ "policy_url": "https://ai.google.dev/gemini-api/docs/usage-policies",
+ "policy_checked": "2026-11-14",
+ "data_use": "EEA: unpaid quota not used for product improvement; usage scanned, kept 55 days."}
