@@ -8,6 +8,8 @@ analysis modules of the worker.
 
 Status: 0.1.0 - skeleton. Protocol, language rules, flat-view names,
 provider profiles and the worker health report work; analysis follows.
+Unreleased: `filetag scan` registers all files of a folder with their
+provenance in the database; `filetag status` summarises it.
 
 ## Architecture
 
@@ -51,7 +53,7 @@ directory, following the XDG convention for user data and executables:
 ~/.local/share/filetag/        one folder for all data of the tool
   venv/                        installed release
   config.toml                  settings (planned)
-  filetag.db                   database (planned)
+  filetag.db                   database (filetag scan, filetag status)
   logs/                        run logs (planned)
   privacy/denylist.txt         terms that must never enter the repository
   privacy/allowlist.txt        phrases in which a listed term is permitted

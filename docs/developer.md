@@ -57,7 +57,10 @@ classDiagram
     +build(title, tag, file_id, ext) str
   }
   class Cli {
+    +Home home
     +run(argv) int
+    +scan(args) int
+    +status(args) int
   }
   class Profile {
     +str id
@@ -79,6 +82,8 @@ classDiagram
     +run(argv) int
   }
   Job ..> Fields : parses with
+  Cli --> Indexer
+  Cli --> Home
   Result ..> Fields : parses with
   Cli --> LanguageTagger
   Cli --> FlatNamer
@@ -86,6 +91,148 @@ classDiagram
   WorkerCli --> Health
   WorkerCli --> ProfileRegistry
 ~~~
+
+## Scan (UML)
+
+~~~mermaid
+classDiagram
+  class Home {
+    +Path root
+    +database Path
+    +ensure() Path
+  }
+  class Scanner {
+    +set include
+    +set exclude
+    +frozenset skip_dirs
+    +list errors
+    +walk(root) Iterator~ScanEntry~
+  }
+  class ScanEntry {
+    +str path
+    +int device
+    +int inode
+    +int size
+    +int mtime_ns
+    +same_inode_state(other) bool
+  }
+  class Fingerprinter {
+    +int chunk
+    +digest(path, size) str
+  }
+  class KindClassifier {
+    +classify(name) tuple
+  }
+  class Database {
+    +start_run(kind, host, root, now) int
+    +finish_run(run_id, status, now)
+    +location(path) tuple
+    +add_file(...) bool
+    +put_location(entry, file_id, run_id, now)
+    +seen(path, file_id, run_id, now)
+    +mark_missing(root, run_id, now) int
+    +status() dict
+  }
+  class Indexer {
+    +scan(root) ScanSummary
+  }
+  class ScanSummary {
+    +int seen
+    +int new_files
+    +int new_paths
+    +int changed
+    +int unchanged
+    +int missing
+    +bool missing_checked
+    +bool aborted
+    +line() str
+  }
+  Indexer --> Scanner
+  Indexer --> Fingerprinter
+  Indexer --> KindClassifier
+  Indexer --> Database
+  Indexer ..> ScanSummary : returns
+  Scanner ..> ScanEntry : yields
+  Database ..> ScanEntry : stores
+~~~
+
+Decision per path (`Indexer._register`):
+
+~~~mermaid
+flowchart TD
+  A[path from Scanner] --> B{known and same device,<br/>inode, size, mtime?}
+  B -- yes --> C[seen: update last_seen, no read]
+  B -- no --> D[fingerprint: size + first and last 16 MiB]
+  D -- read error --> E[record error; known path keeps its old state]
+  D --> F[add_file: new content or last_seen]
+  F --> G[put_location: path -> content]
+~~~
+
+After the walk, `mark_missing` sets `missing_since` on every location
+below the root that this run did not see, but only when the walk was
+complete (no Ctrl+C) and no folder was unreadable. Every 200 files the
+transaction is committed, so an interrupted scan keeps its work.
+
+The fingerprint reads at most 32 MiB per file. Two files of equal size
+that differ only between the first and the last 16 MiB get the same id;
+for media files this is unlikely (container headers and index data sit at
+the ends), but it is a known limit.
+
+## Database (schema version 1)
+
+~~~mermaid
+erDiagram
+  runs ||--o{ locations : "last seen in"
+  files ||--o{ locations : "lies at"
+  files ||--o{ tags : has
+  runs ||--o{ tags : "produced"
+  runs {
+    int id PK
+    text kind
+    text host
+    text root
+    text backend
+    text model
+    text prompt_version
+    text started
+    text finished
+    text status
+  }
+  files {
+    text id PK "fingerprint"
+    int size
+    text kind
+    text mime
+    text first_path
+    text first_seen
+    text last_seen
+  }
+  locations {
+    text path PK
+    text file_id FK
+    int device
+    int inode
+    int size
+    int mtime_ns
+    text first_seen
+    text last_seen
+    int last_run FK
+    text missing_since
+  }
+  tags {
+    text file_id FK
+    text tag
+    text source "controlled or free"
+    int run_id FK
+  }
+~~~
+
+`fts` is an FTS5 table over `title`, `story`, `transcript` and `tags`,
+keyed by `file_id`. The schema version is kept in `PRAGMA user_version`;
+an older filetag refuses a newer database. Tables for analysis results
+(shots, frames, captions, transcripts, stories) come with schema version 2.
+
+Times are ISO 8601 in UTC. Rows are never deleted by filetag.
 
 ## One job (sequence, target design)
 
