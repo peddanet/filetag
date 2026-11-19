@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field
 
+from filetag_protocol.caption import Caption
 from filetag_protocol.errors import ProtocolError
 from filetag_protocol.fields import Fields
 
@@ -11,7 +12,7 @@ STATUSES = ("ok", "error")
 
 
 @dataclass(frozen=True)
-class Result:
+class Result:  # pylint: disable=too-many-instance-attributes
     """Outcome of one job.
 
     Attributes:
@@ -25,6 +26,9 @@ class Result:
         tags: Tags of the controlled vocabulary and free keywords.
         error: Error text when ``status`` is ``error``.
         protocol: Protocol number.
+        captions: Descriptions of the analysed frames.
+        watermarks: Visible marks confirmed across frames.
+        stats: Counters and timings of the analysis.
     """
 
     job_id: str
@@ -37,6 +41,9 @@ class Result:
     tags: list[str] = field(default_factory=list)
     error: str | None = None
     protocol: int = 1
+    captions: list[Caption] = field(default_factory=list)
+    watermarks: list[str] = field(default_factory=list)
+    stats: dict[str, int | float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Validate the fields.
@@ -80,6 +87,12 @@ class Result:
         tags = fields.get("tags", list, required=False) or []
         if not all(isinstance(tag, str) for tag in tags):
             raise ProtocolError("result: tags must be strings")
+        marks = fields.get("watermarks", list, required=False) or []
+        if not all(isinstance(mark, str) for mark in marks):
+            raise ProtocolError("result: watermarks must be strings")
+        captions = [Caption.from_dict(item)
+                    for item in fields.get("captions", list, required=False) or []]
+        stats = fields.get("stats", dict, required=False) or {}
         return cls(job_id=fields.get("job_id", str), status=fields.get("status", str),
                    model=fields.get("model", str, required=False) or "",
                    language=fields.get("language", str, required=False),
@@ -87,4 +100,4 @@ class Result:
                    story=fields.get("story", str, required=False) or "",
                    story_de=fields.get("story_de", str, required=False),
                    tags=tags, error=fields.get("error", str, required=False),
-                   protocol=protocol)
+                   protocol=protocol, captions=captions, watermarks=marks, stats=stats)

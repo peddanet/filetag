@@ -22,6 +22,16 @@ versions: [Semantic Versioning](https://semver.org/). One version covers all pac
 - `filetag status`: files per kind, present and missing paths, last run.
 - Database schema version 1: `runs`, `files`, `locations`, `tags` and the
   full-text index `fts` (SQLite FTS5).
+- `filetag analyze`: describes video files from their images, on this machine
+  or on a worker reached through SSH (`--host`). The model is selectable
+  (`--model`); every n-th frame can use thinking (`--think-every`). Frames,
+  transfer copy and temporary files stay in a private RAM folder and are
+  removed after the job; a job carries no file name.
+- Title, description, search tags and confirmed watermarks from the frame
+  descriptions; a flagged frame stops the file without storing anything.
+- `filetag models`, `filetag show`, `filetag search`;
+  `filetag-worker models` and `filetag-worker job`.
+- Database schema version 2: `analyses` and `captions`.
 
 ## [0.1.0] - 2026-11-17
 

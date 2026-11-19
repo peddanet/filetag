@@ -78,7 +78,6 @@ skip_covered = true
 
 # --- bandit -----------------------------------------------------------------
 [tool.bandit]
-# No skipped checks yet. When external programs (ffmpeg) are called, they are
-# called with argument lists via shutil.which, never with shell=True; the
-# skips B404/B603 are added then, with this justification.
+# External programs (ffmpeg, ffprobe, ssh) are called with argument lists and
+# resolved paths, never with shell=True; the affected lines carry "nosec".
 skips = []

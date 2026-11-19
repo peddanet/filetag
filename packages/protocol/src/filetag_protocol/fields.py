@@ -29,12 +29,12 @@ class Fields:
         self.data: dict[str, Any] = data
         self.what = what
 
-    def get(self, name: str, kind: type, required: bool = True) -> Any:
+    def get(self, name: str, kind: type | tuple[type, ...], required: bool = True) -> Any:
         """Return one field after checking its type.
 
         Args:
             name: Field name.
-            kind: Expected Python type (``int`` excludes ``bool``).
+            kind: Expected Python type or types (``int`` excludes ``bool``).
             required: Whether a missing field or ``null`` is an error.
 
         Returns:
@@ -48,8 +48,10 @@ class Fields:
             if required:
                 raise ProtocolError(f"{self.what}: field '{name}' missing")
             return None
-        if not isinstance(value, kind) or (kind is int and isinstance(value, bool)):
-            raise ProtocolError(f"{self.what}: field '{name}' must be {kind.__name__}")
+        kinds = kind if isinstance(kind, tuple) else (kind,)
+        if not isinstance(value, kinds) or (bool not in kinds and isinstance(value, bool)):
+            names = " or ".join(item.__name__ for item in kinds)
+            raise ProtocolError(f"{self.what}: field '{name}' must be {names}")
         return value
 
     def protocol(self, supported: int) -> int:

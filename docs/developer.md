@@ -229,29 +229,69 @@ erDiagram
 
 `fts` is an FTS5 table over `title`, `story`, `transcript` and `tags`,
 keyed by `file_id`. The schema version is kept in `PRAGMA user_version`;
-an older filetag refuses a newer database. Tables for analysis results
-(shots, frames, captions, transcripts, stories) come with schema version 2.
+an older filetag refuses a newer database. Schema version 2 adds `analyses`
+(one result per file, run and model: title, story, watermarks, statistics)
+and `captions` (one row per analysed frame); version 1 is migrated in place.
+Shots, transcripts and embeddings follow in later versions.
 
 Times are ISO 8601 in UTC. Rows are never deleted by filetag.
 
-## One job (sequence, target design)
+## One job (sequence)
 
 ~~~mermaid
 sequenceDiagram
-  participant C as Controller (core)
-  participant W as Worker
-  participant M as Model backend
-  C->>W: health (SSH or localhost)
-  W-->>C: versions, protocol, programs
-  C->>W: Job JSON + file into RAM work area
-  W->>W: frames, shots, audio, embeddings
-  W->>M: captions, transcript, summaries
-  M-->>W: text
-  W->>W: clear work area
-  W-->>C: Result JSON
-  C->>C: store in database (one transaction)
-  C->>C: project flat view, companion text, xattr
+  participant C as AnalysisRun (core)
+  participant T as WorkerTransport
+  participant J as JobRunner (worker)
+  participant S as Workspace (RAM)
+  participant A as Analyzer
+  participant O as Ollama
+  C->>T: run_job(job, path)
+  T->>J: stdin: job line + file bytes (local or SSH)
+  J->>S: enter: lock, clear leftovers, job folder
+  J->>S: write and verify file (SHA-256)
+  J->>A: run(job, file)
+  loop every planned frame
+    A->>A: cut frame with ffmpeg
+    A->>O: image + instruction, thinking on every n-th frame
+    O-->>A: description, watermarks
+    A->>A: delete frame
+  end
+  A->>O: text only: segment summaries, then title, story, tags (JSON schema)
+  O-->>A: text
+  A-->>J: Result
+  J->>S: exit: remove job folder
+  J-->>T: stdout: Result JSON (stderr: progress without content)
+  T-->>C: Result
+  C->>C: store in one transaction, update search index
 ~~~
+
+## Classes of the analysis (UML)
+
+~~~mermaid
+classDiagram
+  class AnalysisRun { +videos(paths) +run(paths) int }
+  class AnalysisRequest { +options() dict }
+  class WorkerTransport { +command(action) +models() +run_job(job, path, progress) Result }
+  class JobRunner { +run(source, output, log) int }
+  class Workspace { +check_space(size) }
+  class Analyzer { +run(job, video, folder) Result }
+  class Settings { +times(duration) +wants_thinking(index) bool }
+  class OllamaClient { +capabilities(model) +models() +generate(...) }
+  class MediaTools { +duration(video) +frame(video, second, target) }
+  AnalysisRun --> AnalysisRequest
+  AnalysisRun --> WorkerTransport
+  WorkerTransport ..> JobRunner : process
+  JobRunner --> Workspace
+  JobRunner --> Analyzer
+  Analyzer --> Settings
+  Analyzer --> OllamaClient
+  Analyzer --> MediaTools
+~~~
+
+The job carries no file name. Instructions travel inside the job, so private
+wording needs no place in the repository or on a command line. Long videos are
+condensed in blocks of 30 captions before title and story are generated.
 
 ## Pipeline (video)
 
@@ -276,8 +316,9 @@ sequenceDiagram
 
 ## Worker without traces
 
-* Files arrive over SSH in a tmpfs mounted with `noswap`, mode 0700, owned
-  by a service account; names are pseudonymous job ids.
+* Files arrive over SSH in a RAM file system, mode 0700; names are
+  pseudonymous job ids. The default is a private folder in `/dev/shm`;
+  `FILETAG_WORK_ROOT` selects a tmpfs mounted with `noswap` once it exists.
 * The work area is cleared after every job and at service start (the only
   deletion the tool performs: files it created itself in RAM).
 * Only the result (JSON text) leaves the worker.

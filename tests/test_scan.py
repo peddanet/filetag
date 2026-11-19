@@ -176,8 +176,8 @@ def test_database_schema_and_context(tmp_path: Path) -> None:
     """
     path = str(tmp_path / "t.db")
     with Database(path) as db:
-        assert db.version() == 1
-        assert db.status() == {"schema": 1, "files": {}, "paths": 0, "missing": 0,
+        assert db.version() == 2
+        assert db.status() == {"schema": 2, "files": {}, "paths": 0, "missing": 0,
                                "last_run": None}
         db.start_run("scan", "h", None, "t0")
     with pytest.raises(ZeroDivisionError):

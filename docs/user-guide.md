@@ -1,7 +1,8 @@
 # User guide
 
 Version 0.1.0 contains the building blocks; the unreleased version adds
-the scan of a folder into the database. Analysis of files follows in later
+the scan of a folder into the database and a first analysis of video files
+from their images. Speech recognition and the flat view follow in later
 versions. This guide grows with every release.
 
 ## Install
@@ -98,3 +99,43 @@ Notes:
 
 3. *last run* shows id, kind, state (`running`, `done`, `aborted`), start
    and end in UTC.
+
+## Use case: analyse a video on a second computer
+
+The controller keeps the archive and the database; the worker only computes.
+
+1. Install `filetag-core` on the controller and `filetag-worker` on the worker.
+2. On the worker: install Ollama and a model that reads images.
+3. Make sure `ssh WORKER true` works **without a password prompt**. filetag
+   uses SSH keys only (`BatchMode=yes`).
+4. List the models: `filetag models --host WORKER`.
+5. Analyse one file:
+
+   ~~~bash
+   filetag analyze /path/to/video.mp4 --host WORKER
+   ~~~
+
+6. Read the result: `filetag show /path/to/video.mp4 --captions`.
+7. Search all results: `filetag search "harbour"`.
+
+The file is sent through the SSH connection into a private folder in the RAM
+of the worker, under a random job id. File names and paths do not leave the
+controller. The copy is removed at the end of the job.
+
+| Option | Meaning |
+|---|---|
+| `--host WORKER` | SSH destination; without it the worker runs on this machine |
+| `--model NAME` | model of this run |
+| `--interval S` | seconds between frames, default 5 |
+| `--think-every N` | every N-th frame with thinking; `1` always, `0` never, default 6 |
+| `--max-frames N` | upper limit of frames per file |
+| `--prompt FILE`, `--summary-prompt FILE` | own instructions for this run |
+| `--force` | analyse again although this model already has a result |
+
+Own instructions can also be kept in `prompts/caption.txt` and
+`prompts/summary.txt` in the data folder; they are used automatically, sent
+only inside the job and never appear on a command line. Whatever the
+instruction says, a frame answered with `FLAGGED` stops the file: nothing is
+stored and the file needs a review by a person.
+
+If a file fails, the run continues with the next file and ends with exit code 1.

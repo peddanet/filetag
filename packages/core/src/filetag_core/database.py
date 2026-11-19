@@ -1,17 +1,18 @@
 """SQLite database of the controller."""
 from __future__ import annotations
 
+import json
 import sqlite3
 from types import TracebackType
 from typing import Any
 
 from filetag_core.entry import ScanEntry
+from filetag_protocol import Result
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # Version 1: files, where they lie, runs, tags and the full-text index.
-# Tables for analysis results (shots, frames, captions, transcripts,
-# stories) follow with the analysing worker as schema version 2.
+# Version 2: analysis results and the captions of their frames.
 SCHEMA = """
 CREATE TABLE runs (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,6 +56,32 @@ CREATE TABLE tags (
     PRIMARY KEY (file_id, tag)
 );
 CREATE VIRTUAL TABLE fts USING fts5(file_id UNINDEXED, title, story, transcript, tags);
+"""
+
+SCHEMA_2 = """
+CREATE TABLE analyses (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_id     TEXT NOT NULL REFERENCES files(id),
+    run_id      INTEGER NOT NULL REFERENCES runs(id),
+    model       TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    story       TEXT NOT NULL,
+    watermarks  TEXT NOT NULL,
+    stats       TEXT NOT NULL,
+    created     TEXT NOT NULL
+);
+CREATE INDEX analyses_file ON analyses(file_id);
+CREATE TABLE captions (
+    analysis_id INTEGER NOT NULL REFERENCES analyses(id),
+    idx         INTEGER NOT NULL,
+    time_s      REAL NOT NULL,
+    thinking    INTEGER NOT NULL,
+    text        TEXT NOT NULL,
+    watermarks  TEXT NOT NULL,
+    seconds     REAL NOT NULL,
+    tokens      INTEGER NOT NULL,
+    PRIMARY KEY (analysis_id, idx)
+);
 """
 
 
@@ -120,7 +147,7 @@ class Database:
         return int(self.conn.execute("PRAGMA user_version").fetchone()[0])
 
     def migrate(self) -> None:
-        """Create the schema in an empty database.
+        """Create the schema or bring an older one up to date.
 
         Raises:
             RuntimeError: The database has a newer schema.
@@ -130,7 +157,9 @@ class Database:
             raise RuntimeError(f"database schema {current} is newer than {SCHEMA_VERSION}; "
                                "update filetag")
         if current == 0:
-            self.conn.executescript(SCHEMA + f"PRAGMA user_version = {SCHEMA_VERSION};")
+            self.conn.executescript(SCHEMA)
+        if current < 2:
+            self.conn.executescript(SCHEMA_2 + f"PRAGMA user_version = {SCHEMA_VERSION};")
 
     def commit(self) -> None:
         """Commit the open transaction."""
@@ -165,6 +194,125 @@ class Database:
         self.conn.execute("UPDATE runs SET status = ?, finished = ? WHERE id = ?",
                           (status, now, run_id))
         self.conn.commit()
+
+    def describe_run(self, run_id: int, backend: str, model: str) -> None:
+        """Record which backend and model a run uses.
+
+        Args:
+            run_id: Id of the run.
+            backend: Backend description.
+            model: Model name.
+        """
+        self.conn.execute("UPDATE runs SET backend = ?, model = ? WHERE id = ?",
+                          (backend, model, run_id))
+        self.conn.commit()
+
+    def has_analysis(self, file_id: str, model: str) -> bool:
+        """Tell whether a model has already analysed a content.
+
+        Args:
+            file_id: Fingerprint.
+            model: Model name without backend prefix.
+
+        Returns:
+            True when a result exists.
+        """
+        row = self.conn.execute("SELECT 1 FROM analyses WHERE file_id = ? AND model = ? LIMIT 1",
+                                (file_id, f"ollama/{model}")).fetchone()
+        return row is not None
+
+    def add_analysis(self, file_id: str, run_id: int, result: Result, now: str) -> int:
+        """Store a result in one step and refresh the search index.
+
+        Args:
+            file_id: Fingerprint.
+            run_id: Current run.
+            result: Successful result of the worker.
+            now: Time stamp.
+
+        Returns:
+            Id of the stored analysis.
+        """
+        with self.conn:
+            cur = self.conn.execute(
+                "INSERT INTO analyses (file_id, run_id, model, title, story, watermarks, stats, "
+                "created) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (file_id, run_id, result.model, result.title, result.story,
+                 json.dumps(result.watermarks), json.dumps(result.stats, sort_keys=True), now))
+            analysis = int(cur.lastrowid or 0)
+            self.conn.executemany(
+                "INSERT INTO captions (analysis_id, idx, time_s, thinking, text, watermarks, "
+                "seconds, tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [(analysis, c.index, c.time_s, int(c.thinking), c.text,
+                  json.dumps(c.watermarks), c.seconds, c.tokens) for c in result.captions])
+            self.conn.executemany(
+                "INSERT OR IGNORE INTO tags (file_id, tag, source, run_id) "
+                "VALUES (?, ?, 'free', ?)", [(file_id, tag, run_id) for tag in result.tags])
+            self.conn.execute("DELETE FROM fts WHERE file_id = ?", (file_id,))
+            story = "\n".join([result.story, *(c.text for c in result.captions)])
+            self.conn.execute(
+                "INSERT INTO fts (file_id, title, story, transcript, tags) VALUES (?, ?, ?, '', ?)",
+                (file_id, result.title, story, " ".join([*result.tags, *result.watermarks])))
+        return analysis
+
+    def resolve(self, reference: str) -> str | None:
+        """Find a content by path or by the start of its id.
+
+        Args:
+            reference: Absolute path or id prefix.
+
+        Returns:
+            The file id, or None.
+        """
+        row = self.conn.execute("SELECT file_id FROM locations WHERE path = ?",
+                                (reference,)).fetchone()
+        if row is None:
+            row = self.conn.execute("SELECT id FROM files WHERE substr(id, 1, ?) = ? LIMIT 1",
+                                    (len(reference), reference.lower())).fetchone()
+        return None if row is None else str(row[0])
+
+    def latest_analysis(self, file_id: str) -> dict[str, Any] | None:
+        """Read the newest analysis of a content.
+
+        Args:
+            file_id: Fingerprint.
+
+        Returns:
+            Fields of the analysis with its captions, or None.
+        """
+        row = self.conn.execute(
+            "SELECT id, model, title, story, watermarks, stats, created FROM analyses "
+            "WHERE file_id = ? ORDER BY id DESC LIMIT 1", (file_id,)).fetchone()
+        if row is None:
+            return None
+        captions = self.conn.execute(
+            "SELECT time_s, thinking, text FROM captions WHERE analysis_id = ? ORDER BY idx",
+            (row[0],)).fetchall()
+        return {"model": row[1], "title": row[2], "story": row[3],
+                "watermarks": json.loads(row[4]), "stats": json.loads(row[5]),
+                "created": row[6], "captions": captions}
+
+    def search(self, query: str, limit: int = 20) -> list[tuple[str, str, str]]:
+        """Search the analysed files.
+
+        Args:
+            query: Full-text query.
+            limit: Maximum number of hits.
+
+        Returns:
+            File id, title and first known path per hit, best first.
+
+        Raises:
+            ValueError: The query is not valid.
+        """
+        try:
+            rows = self.conn.execute(
+                "SELECT fts.file_id, fts.title, files.first_path FROM fts "
+                "JOIN files ON files.id = fts.file_id WHERE fts MATCH ? ORDER BY rank LIMIT ?",
+                (query, limit)).fetchall()
+        except sqlite3.OperationalError as exc:
+            raise ValueError(f"invalid search: {exc}") from exc
+        return [(str(a), str(b), str(c)) for a, b, c in rows]
 
     def location(self, path: str) -> tuple[ScanEntry, str] | None:
         """Look up what is known about a path.

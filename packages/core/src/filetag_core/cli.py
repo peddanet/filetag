@@ -2,16 +2,22 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections.abc import Sequence
+from typing import Any
 
 from filetag_core import __version__
+from filetag_core.analyze import AnalysisRequest, AnalysisRun, load_prompts
 from filetag_core.database import Database
 from filetag_core.flatname import FlatNamer
 from filetag_core.home import Home
 from filetag_core.indexer import Indexer
 from filetag_core.language import LanguageTagger
 from filetag_core.scanner import Scanner
+from filetag_core.transport import LOCAL, WorkerTransport
+
+DEFAULT_MODEL = "qwen3.8:27b"
 
 
 class Cli:
@@ -63,6 +69,34 @@ class Cli:
                           "$FILETAG_HOME/filetag.db")
         status = sub.add_parser("status", help="summarise the database")
         status.add_argument("--db", default=None, help="database file")
+        analyze = sub.add_parser("analyze", help="describe video files with an AI model")
+        analyze.add_argument("paths", nargs="+", help="video files or folders; only read")
+        analyze.add_argument("--host", default=LOCAL,
+                             help="SSH destination of the worker; default: this machine")
+        analyze.add_argument("--worker", default=None, help="worker program on that host")
+        analyze.add_argument("--model", default=DEFAULT_MODEL, help="model name")
+        analyze.add_argument("--interval", type=float, default=5.0,
+                             help="seconds between frames (default 5)")
+        analyze.add_argument("--think-every", type=int, default=6, metavar="N",
+                             help="every N-th frame with thinking; 0 never, 1 always (default 6)")
+        analyze.add_argument("--max-frames", type=int, default=0,
+                             help="upper frame limit per file; 0 means none")
+        analyze.add_argument("--prompt", default=None, help="file with the frame instruction")
+        analyze.add_argument("--summary-prompt", default=None,
+                             help="file with the summary instruction")
+        analyze.add_argument("--force", action="store_true",
+                             help="analyse again although a result of this model exists")
+        analyze.add_argument("--db", default=None, help="database file")
+        models = sub.add_parser("models", help="list the models of a worker")
+        models.add_argument("--host", default=LOCAL, help="SSH destination; default: this machine")
+        models.add_argument("--worker", default=None, help="worker program on that host")
+        show = sub.add_parser("show", help="show the newest analysis of a file")
+        show.add_argument("file", help="path or start of the file id")
+        show.add_argument("--captions", action="store_true", help="also print the frame texts")
+        show.add_argument("--db", default=None, help="database file")
+        search = sub.add_parser("search", help="search the analysed files")
+        search.add_argument("query", help="search words (SQLite FTS5 syntax)")
+        search.add_argument("--db", default=None, help="database file")
         return parser
 
     def _db_path(self, given: str | None) -> str:
@@ -120,6 +154,90 @@ class Cli:
         print("last run: " + ("none" if last is None else " ".join(str(v) for v in last)))
         return 0
 
+    @staticmethod
+    def _progress(event: dict[str, Any]) -> None:
+        """Print one progress event of the worker.
+
+        Args:
+            event: The event.
+        """
+        if event.get("event") in ("frame", "summary"):
+            done, total = int(event.get("done", 0)) + 1, event.get("total", "?")
+            print(f"... {event['event']} {done}/{total}", file=sys.stderr, flush=True)
+        elif event.get("event") == "receive" and event.get("done") == 0:
+            print("... sending file", file=sys.stderr, flush=True)
+
+    def analyze(self, args: argparse.Namespace) -> int:
+        """Run the ``analyze`` sub-command.
+
+        Args:
+            args: Parsed arguments.
+
+        Returns:
+            0 when all files are done, otherwise 1.
+        """
+        prompts = load_prompts(self.home, args.prompt, args.summary_prompt)
+        request = AnalysisRequest(args.model, args.interval, args.think_every, args.max_frames,
+                                  args.force, prompts)
+        with Database(self._db_path(args.db)) as db:
+            return AnalysisRun(db, WorkerTransport(args.host, args.worker), request,
+                               self._progress, print).run(args.paths)
+
+    @staticmethod
+    def models(args: argparse.Namespace) -> int:
+        """Run the ``models`` sub-command.
+
+        Args:
+            args: Parsed arguments.
+
+        Returns:
+            0.
+        """
+        for item in WorkerTransport(args.host, args.worker).models():
+            features = ",".join(item.get("capabilities", []))
+            print(f"{item.get('name', ''):<28} {item.get('size', 0) / 1e9:6.1f} GB  "
+                  f"{item.get('id', ''):<12}  {features}")
+        return 0
+
+    def show(self, args: argparse.Namespace) -> int:
+        """Run the ``show`` sub-command.
+
+        Args:
+            args: Parsed arguments.
+
+        Returns:
+            0, or 1 when nothing is known about the file.
+        """
+        reference = os.path.realpath(args.file) if os.path.exists(args.file) else args.file
+        with Database(self._db_path(args.db)) as db:
+            file_id = db.resolve(reference)
+            found = db.latest_analysis(file_id or "")
+        if not found:
+            print("filetag: no analysis of this file", file=sys.stderr)
+            return 1
+        print(f"title:      {found['title']}\nmodel:      {found['model']}")
+        print(f"watermarks: {', '.join(found['watermarks']) or 'none'}")
+        print(f"analysed:   {found['created']}\n\n{found['story']}")
+        if args.captions:
+            for second, thinking, text in found["captions"]:
+                print(f"\n[{second:8.1f} s{' T' if thinking else ''}] {text}")
+        return 0
+
+    def search(self, args: argparse.Namespace) -> int:
+        """Run the ``search`` sub-command.
+
+        Args:
+            args: Parsed arguments.
+
+        Returns:
+            0 with hits, otherwise 1.
+        """
+        with Database(self._db_path(args.db)) as db:
+            hits = db.search(args.query)
+        for file_id, title, path in hits:
+            print(f"{file_id[:8]}  {title}\n          {path}")
+        return 0 if hits else 1
+
     def run(self, argv: Sequence[str]) -> int:
         """Run the command line.
 
@@ -131,10 +249,11 @@ class Cli:
         """
         args = self.parser().parse_args(list(argv))
         try:
-            if args.command == "scan":
-                return self.scan(args)
-            if args.command == "status":
-                return self.status(args)
+            handler = {"scan": self.scan, "status": self.status, "analyze": self.analyze,
+                       "models": self.models, "show": self.show,
+                       "search": self.search}.get(args.command)
+            if handler is not None:
+                return handler(args)
             tag = self.tagger.title_tag(args.lang)
             print(self.namer.build(args.title, tag, args.file_id, args.ext))
         except (ValueError, OSError, RuntimeError) as exc:
